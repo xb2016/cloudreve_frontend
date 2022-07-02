@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button, Paper } from "@material-ui/core";
 import { makeStyles, useTheme } from "@material-ui/core/styles";
 import { useLocation, useParams, useRouteMatch } from "react-router";
@@ -13,11 +13,13 @@ import { getViewerURL } from "../../redux/explorer/action";
 import { subtitleSuffix, videoPreviewSuffix } from "../../config";
 import { toggleSnackbar } from "../../redux/explorer";
 import { pathJoin } from "../Uploader/core/utils";
-import { Launch, PlaylistPlay, Subtitles } from "@material-ui/icons";
+import { Launch, PlaylistPlay, Subtitles, CheckBoxOutlineBlank, CheckBox } from "@material-ui/icons";
 import TextLoading from "../Placeholder/TextLoading";
 import SelectMenu from "./SelectMenu";
 import { getDownloadURL } from "../../services/file";
 import { sortMethodFuncs } from "../../redux/explorer/action";
+import Auth from "../../middleware/Auth";
+import flvjs from "flv.js";
 import { useTranslation } from "react-i18next";
 
 const Artplayer = React.lazy(() =>
@@ -99,6 +101,7 @@ export default function VideoViewer() {
         [dispatch]
     );
     const { title, path } = UseFileSubTitle(query, math, location);
+    const classes = useStyles();
     const theme = useTheme();
     const [art, setArt] = useState(null);
     const history = useHistory();
@@ -109,73 +112,26 @@ export default function VideoViewer() {
     const [subtitleSelected, setSubtitleSelected] = useState("");
     const [playlistOpen, setPlaylistOpen] = useState(null);
     const [externalPlayerOpen, setExternalPlayerOpen] = useState(null);
+    const [autoPlayNext, setAutoPlayNext] = useState(Auth.GetPreferenceWithDefault("video_auto_next", false));
+    const nextInfo = useRef([autoPlayNext, null]);
     const isShare = pathHelper.isSharePage(location.pathname);
     const sortMethod = useSelector((state) => state.viewUpdate.sortMethod);
     const sortFunc = sortMethodFuncs[sortMethod];
 
-    useEffect(() => {
-        art &&
-            art.on("ready", () => {
-                art.autoHeight = true;
-            });
-        return () => {
-            if (
-                art !== null &&
-                !isMobileSafari() &&
-                document.pictureInPictureEnabled &&
-                art.playing
-            ) {
-                art.pip = true;
-                art.query(".art-video").addEventListener(
-                    "leavepictureinpicture",
-                    () => {
-                        art.pause();
-                    },
-                    false
-                );
+    const switchVideo = (file) => {
+        setPlaylistOpen(null);
+        setSubtitleSelected(null);
+        if (file.name != title) {
+            if (isShare) {
+                file.key = id;
             }
-        };
-    }, [art]);
-
-    const classes = useStyles();
-
-    useEffect(() => {
-        if (art !== null) {
-            const newURL = getPreviewURL(
-                isShare,
-                id,
-                query.get("id"),
-                query.get("share_path")
-            );
-            if (newURL !== art.url) {
-                if (art.subtitle) {
-                    art.subtitle.show = false;
-                }
-                art.switchUrl(newURL);
-                if (path && path !== "") {
-                    list(
-                        basename(path),
-                        isShare ? { key: id } : null,
-                        "",
-                        ""
-                    ).then((res) => {
-                        setFiles(
-                            res.data.objects.sort(sortFunc).filter((o) => o.type === "file")
-                        );
-                        setPlaylist(
-                            res.data.objects.filter(
-                                (o) =>
-                                    o.type === "file" &&
-                                    videoPreviewSuffix.indexOf(
-                                        o.name.split(".").pop().toLowerCase()
-                                    ) !== -1
-                            )
-                        );
-                    });
-                }
+            if (isMobileSafari()) {
+                window.location.href = getViewerURL("video", file, isShare);
+            } else {
+                history.push(getViewerURL("video", file, isShare));
             }
         }
-    }, [art, id, location, path]);
+    };
 
     const switchSubtitle = (f) => {
         if (art !== null) {
@@ -204,39 +160,6 @@ export default function VideoViewer() {
         }
     };
 
-    useEffect(() => {
-        if (files.length > 0) {
-            const fileNameMatch = fileNameNoExt(title) + ".";
-            const options = files.filter((f) => {
-                const fileType = f.name.split(".").pop().toLowerCase();
-                return subtitleSuffix.indexOf(fileType) !== -1;
-            }).sort((a, b) => {
-                return (a.name.startsWith(fileNameMatch) && !b.name.startsWith(fileNameMatch)) ? -1 : 0;
-            });
-            if (options.length > 0 && options[0].name.startsWith(fileNameMatch)) {
-                switchSubtitle(options[0]);
-            }
-            setSubtitles(options);
-        }
-    }, [files]);
-
-    const switchVideo = (file) => {
-        setSubtitleSelected(null);
-        if (isShare) {
-            file.key = id;
-        }
-        if (isMobileSafari()) {
-            window.location.href = getViewerURL("video", file, isShare);
-        } else {
-            history.push(getViewerURL("video", file, isShare));
-        }
-    };
-
-    const setSubtitle = (sub) => {
-        setSubtitleOpen(null);
-        switchSubtitle(sub);
-    };
-
     const startSelectSubTitle = (e) => {
         if (subtitles.length === 0) {
             ToggleSnackbar(
@@ -248,6 +171,25 @@ export default function VideoViewer() {
             return;
         }
         setSubtitleOpen(e.currentTarget);
+    };
+
+    const setSubtitle = (sub) => {
+        setSubtitleOpen(null);
+        switchSubtitle(sub);
+    };
+
+    const switchAutoPlayNext = () => {
+        setAutoPlayNext((previous) => {
+            nextInfo.current[0] = !previous;
+            Auth.SetPreference("video_auto_next", !previous);
+            return !previous;
+        })
+    };
+
+    const playNext = () => {
+        if (nextInfo.current[0] && nextInfo.current[1]) {
+            switchVideo(nextInfo.current[1]);
+        }
     };
 
     const openInExternalPlayer = (player) => {
@@ -268,6 +210,97 @@ export default function VideoViewer() {
             });
     };
 
+    useEffect(() => {
+        art &&
+            art.on("ready", () => {
+                art.autoHeight = true;
+            }) &&
+            art.on("video:ended", playNext);
+        return () => {
+            if (
+                art !== null &&
+                !isMobileSafari() &&
+                document.pictureInPictureEnabled &&
+                art.playing
+            ) {
+                art.pip = true;
+                art.query(".art-video").addEventListener(
+                    "leavepictureinpicture",
+                    () => {
+                        art.pause();
+                    },
+                    false
+                );
+            }
+        };
+    }, [art]);
+
+    useEffect(() => {
+        if (art !== null) {
+            const newURL = getPreviewURL(
+                isShare,
+                id,
+                query.get("id"),
+                query.get("share_path")
+            );
+            if (art.url.indexOf(newURL) === -1) {
+                if (art.subtitle) {
+                    art.subtitle.show = false;
+                }
+
+                if (art.flvPlayer) {
+                    art.flvPlayer.destroy();
+                    art.flvPlayer = null;
+                } else {
+                    const oldURL = art.url;
+                    art.option.type = title.split(".").pop().toLowerCase();
+                    art.switchUrl(newURL);
+                    if (oldURL && !art.playing) {
+                        setTimeout(() => { art.play() }, 500);
+                    }
+                }
+
+                if (path && path !== "") {
+                    list(
+                        basename(path),
+                        isShare ? { key: id } : null,
+                        "",
+                        ""
+                    ).then((res) => {
+                        const fileList = res.data.objects.sort(sortFunc).filter((o) => o.type === "file");
+                        const videoList = fileList.filter((o) =>
+                            videoPreviewSuffix.indexOf(
+                                o.name.split(".").pop().toLowerCase()
+                            ) !== -1
+                        );
+                        const currentIndex = videoList.findIndex((value) => value.name == title);
+                        const nextVideo = videoList[currentIndex + 1] || null;
+
+                        nextInfo.current[1] = nextVideo;
+                        setFiles(fileList);
+                        setPlaylist(videoList);
+                    });
+                }
+            }
+        }
+    }, [art, id, location, path]);
+
+    useEffect(() => {
+        if (files.length > 0) {
+            const fileNameMatch = fileNameNoExt(title) + ".";
+            const options = files.filter((f) => {
+                return subtitleSuffix.indexOf(f.name.split(".").pop().toLowerCase()) !== -1;
+            }).sort((a, b) => {
+                return (a.name.startsWith(fileNameMatch) && !b.name.startsWith(fileNameMatch)) ? -1 : 0;
+            });
+
+            if (options.length > 0 && options[0].name.startsWith(fileNameMatch)) {
+                switchSubtitle(options[0]);
+            }
+            setSubtitles(options);
+        }
+    }, [files]);
+
     return (
         <div className={classes.layout}>
             <Paper className={classes.root} elevation={1}>
@@ -276,6 +309,7 @@ export default function VideoViewer() {
                         option={{
                             title: title,
                             theme: theme.palette.secondary.main,
+                            type: title.split(".").pop().toLowerCase(),
                             flip: true,
                             setting: true,
                             playbackRate: true,
@@ -285,12 +319,31 @@ export default function VideoViewer() {
                             fullscreen: true,
                             fullscreenWeb: true,
                             autoHeight: true,
+                            subtitleOffset: true,
                             whitelist: ["*"],
                             moreVideoAttr: {
                                 "webkit-playsinline": true,
                                 playsInline: true,
                             },
                             lang: t("artPlayerLocaleCode", { ns: "common" }),
+                            customType: {
+                                flv: function (video, url, art) {
+                                    if (flvjs.isSupported()) {
+                                        flvjs.LoggingControl.enableAll = false;
+                                        art.flvPlayer = flvjs.createPlayer({
+                                            type: "flv",
+                                            url: url,
+                                        }, {
+                                            lazyLoadMaxDuration: 5 * 60,
+                                            accurateSeek: true,
+                                        });
+                                        art.flvPlayer.attachMediaElement(video);
+                                        art.flvPlayer.load();
+                                    } else {
+                                        art.notice.show = t("fileManager.unsupportFLV");
+                                    }
+                                },
+                            },
                         }}
                         className={classes.player}
                         getInstance={(a) => setArt(a)}
@@ -307,14 +360,24 @@ export default function VideoViewer() {
                     {t("fileManager.subtitle")}
                 </Button>
                 {playlist.length >= 2 && (
-                    <Button
-                        onClick={(e) => setPlaylistOpen(e.currentTarget)}
-                        className={classes.actionButton}
-                        startIcon={<PlaylistPlay />}
-                        variant="outlined"
-                    >
-                        {t("fileManager.playlist")}
-                    </Button>
+                    <>
+                        <Button
+                            onClick={(e) => setPlaylistOpen(e.currentTarget)}
+                            className={classes.actionButton}
+                            startIcon={<PlaylistPlay />}
+                            variant="outlined"
+                        >
+                            {t("fileManager.playlist")}
+                        </Button>
+                        <Button
+                            onClick={switchAutoPlayNext}
+                            className={classes.actionButton}
+                            startIcon={autoPlayNext ? <CheckBox /> : <CheckBoxOutlineBlank />}
+                            variant="outlined"
+                        >
+                            {t("fileManager.autoPlayNext")}
+                        </Button>
+                    </>
                 )}
                 <Button
                     onClick={(e) => setExternalPlayerOpen(e.currentTarget)}

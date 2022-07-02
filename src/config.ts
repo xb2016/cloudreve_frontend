@@ -20,7 +20,7 @@ export const msDocPreviewSuffix = [
 ];
 export const subtitleSuffix = ["ass", "srt", "vrr"];
 export const audioPreviewSuffix = ["mp3", "ogg", "wav", "flac", "m4a"];
-export const videoPreviewSuffix = ["mp4", "mkv", "webm", "avi", "m3u8", "mov"];
+export const videoPreviewSuffix = ["mp4", "mkv", "webm", "avi", "m3u8", "mov", "flv"];
 export const pdfPreviewSuffix = ["pdf"];
 export const editSuffix = ["md", "txt"];
 export const epubSuffix = ["epub"];
