@@ -2,7 +2,7 @@ import React, { Component } from "react";
 import PropTypes from "prop-types";
 import { connect } from "react-redux";
 import PathSelector from "./PathSelector";
-import API from "../../middleware/Api";
+import API, { AppError } from "../../middleware/Api";
 import {
     Button,
     CircularProgress,
@@ -16,6 +16,7 @@ import {
 } from "@material-ui/core";
 import Loading from "../Modals/Loading";
 import CopyDialog from "../Modals/Copy";
+import DirectoryDownloadDialog from "../Modals/DirectoryDownload";
 import CreatShare from "../Modals/CreateShare";
 import { withRouter } from "react-router-dom";
 import DecompressDialog from "../Modals/Decompress";
@@ -455,7 +456,7 @@ class ModalsCompoment extends Component {
             .then((response) => {
                 const failed = response.data
                     .filter((r) => r.code !== 0)
-                    .map((r) => r.msg + (r.error ? r.error : ""));
+                    .map((r) => new AppError(r.msg, r.code, r.error).message);
                 if (failed.length > 0) {
                     this.props.toggleSnackbar(
                         "top",
@@ -1004,6 +1005,12 @@ class ModalsCompoment extends Component {
                     presentPath={this.props.path}
                     selected={this.props.selected}
                     modalsLoading={this.props.modalsLoading}
+                />
+                <DirectoryDownloadDialog
+                    open={this.props.modalsStatus.directoryDownloading}
+                    onClose={this.onClose}
+                    done={this.props.modalsStatus.directoryDownloadDone}
+                    log={this.props.modalsStatus.directoryDownloadLog}
                 />
             </div>
         );
